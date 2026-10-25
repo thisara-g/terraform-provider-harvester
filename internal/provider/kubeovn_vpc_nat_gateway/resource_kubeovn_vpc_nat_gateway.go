@@ -2,12 +2,16 @@ package kubeovn_vpc_nat_gateway
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/retry"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	nadv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	kubeovnv1 "github.com/kubeovn/kube-ovn/pkg/apis/kubeovn/v1"
+	kubeovnclient "github.com/kubeovn/kube-ovn/pkg/client/clientset/versioned/typed/kubeovn/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -17,6 +21,10 @@ import (
 	"github.com/harvester/terraform-provider-harvester/pkg/helper"
 	"github.com/harvester/terraform-provider-harvester/pkg/importer"
 )
+
+// kubeOVNProvider is kube-ovn's default subnet provider (OvnProvider in kube-ovn
+// pkg/util, a package too heavy to import here).
+const kubeOVNProvider = "ovn"
 
 func ResourceKubeOVNVpcNatGateway() *schema.Resource {
 	return &schema.Resource{
@@ -48,7 +56,11 @@ func resourceKubeOVNVpcNatGatewayCreate(ctx context.Context, d *schema.ResourceD
 	if err != nil {
 		return diag.FromErr(err)
 	}
-	obj, err := c.KubeOVNClient.KubeovnV1().VpcNatGateways().Create(ctx, toCreate.(*kubeovnv1.VpcNatGateway), metav1.CreateOptions{})
+	gateway := toCreate.(*kubeovnv1.VpcNatGateway)
+	if err := setLanNetworkAttachment(ctx, c.KubeOVNClient.KubeovnV1().Subnets(), gateway); err != nil {
+		return diag.FromErr(err)
+	}
+	obj, err := c.KubeOVNClient.KubeovnV1().VpcNatGateways().Create(ctx, gateway, metav1.CreateOptions{})
 	if err != nil {
 		return diag.FromErr(err)
 	}
@@ -124,6 +136,45 @@ func resourceKubeOVNVpcNatGatewayDelete(ctx context.Context, d *schema.ResourceD
 	}
 	d.SetId("")
 	return nil
+}
+
+// setLanNetworkAttachment attaches the gateway pod to subnet when kube-ovn is a
+// secondary CNI, as on Harvester. kube-ovn then adds to the pod only the
+// network attachment definitions listed in the gateway's
+// k8s.v1.cni.cncf.io/networks annotation, plus the external one: without it
+// the pod has no interface in subnet and nothing holds lan_ip. The Harvester UI
+// sets the annotation to the subnet's network attachment definition; this
+// derives it the same way, from the subnet provider. Only the creation needs
+// it: subnet is ForceNew and kube-ovn reads the annotation when it builds the
+// gateway StatefulSet.
+func setLanNetworkAttachment(ctx context.Context, subnets kubeovnclient.SubnetInterface, gateway *kubeovnv1.VpcNatGateway) error {
+	subnet, err := subnets.Get(ctx, gateway.Spec.Subnet, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("getting subnet %s of the gateway: %w", gateway.Spec.Subnet, err)
+	}
+	attachment, err := lanNetworkAttachment(subnet.Spec.Provider)
+	if err != nil || attachment == "" {
+		return err
+	}
+	if gateway.Annotations == nil {
+		gateway.Annotations = map[string]string{}
+	}
+	gateway.Annotations[nadv1.NetworkAttachmentAnnot] = attachment
+	return nil
+}
+
+// lanNetworkAttachment returns the <namespace>/<name> of the network attachment
+// definition behind a subnet provider <name>.<namespace>.ovn, or "" for the
+// default ovn provider, whose subnets need no network attachment definition.
+func lanNetworkAttachment(provider string) (string, error) {
+	if provider == "" || provider == kubeOVNProvider {
+		return "", nil
+	}
+	parts := strings.Split(provider, ".")
+	if len(parts) != 3 || parts[2] != kubeOVNProvider {
+		return "", fmt.Errorf("subnet provider %q is not <name>.<namespace>.%s", provider, kubeOVNProvider)
+	}
+	return parts[1] + "/" + parts[0], nil
 }
 
 func resourceKubeOVNVpcNatGatewayImport(d *schema.ResourceData, obj *kubeovnv1.VpcNatGateway) error {

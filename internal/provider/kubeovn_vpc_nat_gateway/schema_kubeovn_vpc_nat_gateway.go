@@ -23,7 +23,7 @@ func Schema() map[string]*schema.Schema {
 			Type:        schema.TypeString,
 			Required:    true,
 			ForceNew:    true,
-			Description: "Name of the VPC subnet the gateway pod is attached to.",
+			Description: "Name of the VPC subnet the gateway pod is attached to. When its network_provider is <network name>.<network namespace>.ovn, as on Harvester, the gateway gets the annotation k8s.v1.cni.cncf.io/networks: <network namespace>/<network name>, which kube-ovn as a secondary CNI needs to attach the pod to the subnet.",
 		},
 		constants.FieldKubeOVNVpcNatGwLanIP: {
 			Type:        schema.TypeString,

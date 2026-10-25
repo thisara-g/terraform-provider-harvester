@@ -45,7 +45,7 @@ resource "harvester_kubeovn_vpc_nat_gateway" "example" {
 
 - `lan_ip` (String) Address of the gateway in subnet. It must be inside the subnet CIDR and free: the VPC routes its external traffic to it.
 - `name` (String) A unique name
-- `subnet` (String) Name of the VPC subnet the gateway pod is attached to.
+- `subnet` (String) Name of the VPC subnet the gateway pod is attached to. When its network_provider is <network name>.<network namespace>.ovn, as on Harvester, the gateway gets the annotation k8s.v1.cni.cncf.io/networks: <network namespace>/<network name>, which kube-ovn as a secondary CNI needs to attach the pod to the subnet.
 - `vpc` (String) Name of the VPC the gateway serves.
 
 ### Optional

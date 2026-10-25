@@ -39,6 +39,6 @@ data "harvester_kubeovn_vpc_nat_gateway" "example" {
 - `status_external_subnets` (List of String) External subnets applied by kube-ovn.
 - `status_qos_policy` (String) QoS policy applied by kube-ovn.
 - `status_selector` (List of String) Node selector applied by kube-ovn.
-- `subnet` (String) Name of the VPC subnet the gateway pod is attached to.
+- `subnet` (String) Name of the VPC subnet the gateway pod is attached to. When its network_provider is <network name>.<network namespace>.ovn, as on Harvester, the gateway gets the annotation k8s.v1.cni.cncf.io/networks: <network namespace>/<network name>, which kube-ovn as a secondary CNI needs to attach the pod to the subnet.
 - `tags` (Map of String)
 - `vpc` (String) Name of the VPC the gateway serves.
